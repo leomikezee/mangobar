@@ -101,6 +101,10 @@ typedef struct {
   uint32_t pinned_tags; // bitmask of tags always shown
   char overview_label[64];
   bool only_occupied;
+  bool workspace_app_icons;
+  int workspace_icon_size;
+  int workspace_icon_spacing;
+  int workspace_max_icons;
   char separator[16];
   int tray_pad;
   int tray_gap;

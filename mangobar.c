@@ -43,10 +43,12 @@
 
 #include "cursor-shape-v1-protocol.h"
 #include "menu.h"
+#include "icons.h"
 #include "defaults.h"
 #include "rtconfig.h"
 #include "style.h"
 #include "tray.h"
+#include "workspace-apps.h"
 #include "wlr-layer-shell-unstable-v1-protocol.h"
 #include "xdg-output-unstable-v1-protocol.h"
 #include "xdg-shell-protocol.h"
@@ -1007,15 +1009,24 @@ static int module_radius(const ModuleStyle *st, uint32_t h) {
   return r;
 }
 
+static const int workspace_label_gap = 4;
+
+static uint32_t workspace_icons_width(const WorkspaceIcons *icons) {
+  return icons->count
+             ? workspace_label_gap + icons->count * (icons->size + icons->spacing)
+             : 0;
+}
+
 static EntryGeom layout_module(Bar *bar, const char *module, int tag,
                                const char *text, const ModuleStyle *st,
-                               uint32_t x, uint32_t buf_h, uint32_t group_max) {
+                               uint32_t x, uint32_t buf_h, uint32_t group_max,
+                               uint32_t icon_width) {
   EntryGeom g = {.x0 = x, .x1 = x, .x2 = x, .end = x, .paint = x};
   if (!text || !*text)
     return g;
   int32_t mn = 0, mx = 0;
   uint32_t tw = text_metrics(text, &mn, &mx);
-  uint32_t body = tw + st->pad_l + st->pad_r;
+  uint32_t body = tw + icon_width + st->pad_l + st->pad_r;
   uint32_t mw = body + st->margin_l + st->margin_r;
   if ((int)mw < st->min_width) {
     mw = (uint32_t)st->min_width;
@@ -1038,7 +1049,7 @@ static void paint_module(Bar *bar, const char *module, int tag,
                          const char *text, ModuleStyle *st, const EntryGeom *g,
                          uint32_t y, pixman_image_t *fg,
                          pixman_image_t *fg_mask, pixman_image_t *bg,
-                         uint32_t buf_h) {
+                         uint32_t buf_h, const WorkspaceIcons *icons) {
   if (!text || !*text)
     return;
   int32_t mn = 0, mx = 0;
@@ -1092,13 +1103,38 @@ static void paint_module(Bar *bar, const char *module, int tag,
                             .y2 = (g_rt->bar_top + buf_h) * s});
     }
     uint32_t text_x = x1 + st->pad_l;
+    uint32_t content_w = tw + workspace_icons_width(icons);
     if (st->center) {
-      uint32_t body_w = x2 - x1;
-      uint32_t inner = body_w - st->pad_l - st->pad_r;
-      if (tw < inner)
-        text_x = x1 + st->pad_l + (inner - tw) / 2;
+      int inner = (int)(x2 - x1) - st->pad_l - st->pad_r;
+      if (inner > (int)content_w)
+        text_x += (inner - content_w) / 2;
     }
     draw_text(text, text_x, y, fg, fg_mask, NULL, &st->fg, NULL, max_x, buf_h);
+    if (icons->count && bar_bg_cr) {
+      cairo_save(bar_bg_cr);
+      cairo_rectangle(bar_bg_cr, x1, g_rt->bar_top, x2 - x1, buf_h);
+      cairo_clip(bar_bg_cr);
+      double icon_x = text_x + tw + icons->spacing + workspace_label_gap;
+      int scale = bar->scale > 0 ? bar->scale : 1;
+      for (int i = 0; i < icons->count; i++) {
+        pixman_image_t *image = icons->images[i];
+        int w = pixman_image_get_width(image);
+        int h = pixman_image_get_height(image);
+        cairo_surface_t *surface = cairo_image_surface_create_for_data(
+            (unsigned char *)pixman_image_get_data(image), CAIRO_FORMAT_ARGB32,
+            w, h, pixman_image_get_stride(image));
+        cairo_save(bar_bg_cr);
+        cairo_translate(bar_bg_cr, icon_x + (icons->size - (double)w / scale) / 2,
+                        g_rt->bar_top + (buf_h - (double)h / scale) / 2);
+        cairo_scale(bar_bg_cr, 1.0 / scale, 1.0 / scale);
+        cairo_set_source_surface(bar_bg_cr, surface, 0, 0);
+        cairo_paint(bar_bg_cr);
+        cairo_restore(bar_bg_cr);
+        cairo_surface_destroy(surface);
+        icon_x += icons->size + icons->spacing;
+      }
+      cairo_restore(bar_bg_cr);
+    }
   }
 }
 
@@ -1243,6 +1279,7 @@ typedef struct {
   bool is_tray;
   uint32_t width;
   int tray_icon_size;
+  WorkspaceIcons icons;
 } ModuleEntry;
 
 typedef struct {
@@ -1359,8 +1396,17 @@ static int append_module_entries(Bar *bar, int id, ModuleEntry *ents, int max,
           apply_css_resolved(&g_rt->st_tags_hover_scratch, g_rt->st_tag_hover_css);
           st = &g_rt->st_tags_hover_scratch;
         }
-        ents[n++] = (ModuleEntry){.text = g_cfg.tag_names[i], .st = st,
-                                  .module = "tags", .tag = i};
+        ModuleEntry *entry = &ents[n++];
+        *entry = (ModuleEntry){.text = g_cfg.tag_names[i], .st = st,
+                               .module = "tags", .tag = i};
+        if (g_cfg.workspace_app_icons) {
+          int size = g_cfg.workspace_icon_size;
+          if (size > (int)g_rt->bar_h)
+            size = (int)g_rt->bar_h;
+          entry->icons = workspace_apps_icons(bar->name, i, size, bar->scale,
+                                             g_cfg.workspace_icon_spacing,
+                                             g_cfg.workspace_max_icons);
+        }
       }
     }
     break;
@@ -1608,7 +1654,8 @@ static uint32_t module_entry_width(const ModuleEntry *e) {
     return 0;
   int32_t mn, mx;
   uint32_t tw = text_metrics(e->text, &mn, &mx);
-  uint32_t body = tw + e->st->pad_l + e->st->pad_r;
+  uint32_t body = tw + workspace_icons_width(&e->icons) +
+                  e->st->pad_l + e->st->pad_r;
   uint32_t mw = body + e->st->margin_l + e->st->margin_r;
   if ((int)mw < e->st->min_width)
     mw = (uint32_t)e->st->min_width;
@@ -1757,8 +1804,15 @@ static void entry_signature(const Bar *bar, const ModuleEntry *e, char *ident,
     snprintf(ident, idsz, "%s#%d", e->module ? e->module : "", e->tag);
   else
     snprintf(ident, idsz, "%s", e->module ? e->module : "");
+  uint64_t signature = style_sig(e->st);
+  if (e->icons.count) {
+    signature = hash_mix(signature, e->icons.size);
+    signature = hash_mix(signature, e->icons.spacing);
+    for (int i = 0; i < e->icons.count; i++)
+      signature = hash_mix(signature, (uintptr_t)e->icons.images[i]);
+  }
   int o = snprintf(key, ksz, "%s|%d|%016llx|%u", ident, bar->scale,
-                   (unsigned long long)style_sig(e->st), e->width);
+                   (unsigned long long)signature, e->width);
   if (o < 0)
     o = 0;
   if ((size_t)o >= ksz) {
@@ -1818,7 +1872,7 @@ static pixman_image_t *render_entry_raster(Bar *bar, const LaidEntry *le,
                      buf_h);
   else
     paint_module(bar, le->e.module, le->e.tag, le->e.text, le->e.st, &le->g, y,
-                 bar->w_fg, bar->w_mask, bar->w_bg, buf_h);
+                 bar->w_fg, bar->w_mask, bar->w_bg, buf_h, &le->e.icons);
 
   if (bar_bg_cr) {
     cairo_destroy(bar_bg_cr);
@@ -2133,7 +2187,8 @@ static void draw_bar(Bar *bar) {
     EntryGeom g = me.is_tray
                       ? layout_tray_entry(bar, &me, x, left_max, buf_h)
                       : layout_module(bar, me.module, me.tag, me.text, me.st, x,
-                                      buf_h, left_max);
+                                      buf_h, left_max,
+                                      workspace_icons_width(&me.icons));
     laid[laid_n].e = me;
     laid[laid_n].g = g;
     laid_n++;
@@ -2203,7 +2258,8 @@ static void draw_bar(Bar *bar) {
       EntryGeom g = me.is_tray
                         ? layout_tray_entry(bar, &me, cx, center_max, buf_h)
                         : layout_module(bar, me.module, me.tag, me.text, me.st,
-                                        cx, buf_h, center_max);
+                                        cx, buf_h, center_max,
+                                        workspace_icons_width(&me.icons));
       laid[laid_n].e = me;
       laid[laid_n].g = g;
       laid_n++;
@@ -2220,7 +2276,8 @@ static void draw_bar(Bar *bar) {
     EntryGeom g = me.is_tray
                       ? layout_tray_entry(bar, &me, cur_x, right_edge, buf_h)
                       : layout_module(bar, me.module, me.tag, me.text, me.st,
-                                      cur_x, buf_h, right_edge);
+                                      cur_x, buf_h, right_edge,
+                                      workspace_icons_width(&me.icons));
     laid[laid_n].e = me;
     laid[laid_n].g = g;
     laid_n++;
@@ -5398,11 +5455,18 @@ static void register_custom_signals(void) {
 
 static void event_loop() {
   int wl_fd = wl_display_get_fd(display);
+  bool app_icons_enabled = false;
+  for (size_t i = 0; i < g_config_set.count; i++)
+    app_icons_enabled |= g_config_set.profiles[i].config.workspace_app_icons;
   while (running) {
     int tray_fd = tray ? tray_get_fd(tray) : -1;
-    struct pollfd fds[6];
+    if (app_icons_enabled && workspace_apps_refresh(now_ms())) {
+      Bar *b;
+      wl_list_for_each(b, &bar_list, link) b->redraw = true;
+    }
+    struct pollfd fds[7];
     int nfds = 0, ipc_idx = -1, tray_idx = -1, pa_idx = -1, udev_idx = -1;
-    int signal_idx = -1;
+    int signal_idx = -1, apps_idx = -1;
     fds[nfds++] =
         (struct pollfd){.fd = wl_fd, .events = POLLIN | POLLERR | POLLHUP};
     if (signal_fd >= 0) {
@@ -5426,6 +5490,10 @@ static void event_loop() {
     if (g_udev_fd >= 0) {
       udev_idx = nfds;
       fds[nfds++] = (struct pollfd){.fd = g_udev_fd, .events = POLLIN};
+    }
+    if (workspace_apps_fd() >= 0) {
+      apps_idx = nfds;
+      fds[nfds++] = (struct pollfd){.fd = workspace_apps_fd(), .events = POLLIN};
     }
     // Short timeout while refreshing or the menu is open.
     int timeout = 1000;
@@ -5502,6 +5570,11 @@ static void event_loop() {
         ipc_fd = -1;
         ipc_buf_len = 0;
       }
+    }
+    if (apps_idx >= 0 && (fds[apps_idx].revents & (POLLIN | POLLHUP | POLLERR)) &&
+        workspace_apps_dispatch()) {
+      Bar *b;
+      wl_list_for_each(b, &bar_list, link) b->redraw = true;
     }
     if (tray_idx >= 0 && (fds[tray_idx].revents & (POLLIN | POLLOUT))) {
       tray_dispatch(tray);
@@ -5982,6 +6055,8 @@ int main(int argc, char **argv) {
     close(ipc_fd);
   if (tray)
     tray_destroy(tray);
+  workspace_apps_finish();
+  icons_finish();
   if (pa_ml) {
     atomic_store(&pa_running, false);
     pa_mainloop_wakeup(pa_ml);

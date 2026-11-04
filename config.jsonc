@@ -31,6 +31,10 @@
 
     "workspaces": {
         "hide-empty": true,
+        "show-app-icons": false,
+        "app-icon-size": 16,
+        "app-icon-spacing": 4,
+        "max-app-icons": 5,
         // "pinned": [1, 2],
         // "tag-names": ["1", "2", "3", "编", "网"],
         "overview-label": "OVERVIEW",

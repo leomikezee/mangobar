@@ -486,6 +486,13 @@ static void parse_module_configs(cJSON *root) {
     m = cJSON_GetObjectItemCaseSensitive(root, "mango/workspaces");
   if (cJSON_IsObject(m)) {
     parse_target->only_occupied = cfg_bool(m, "hide-empty", true);
+    parse_target->workspace_app_icons = cfg_bool(m, "show-app-icons", false);
+    int size = cfg_int(m, "app-icon-size", parse_target->workspace_icon_size);
+    int spacing = cfg_int(m, "app-icon-spacing", parse_target->workspace_icon_spacing);
+    int limit = cfg_int(m, "max-app-icons", parse_target->workspace_max_icons);
+    parse_target->workspace_icon_size = size < 1 ? 1 : size > 128 ? 128 : size;
+    parse_target->workspace_icon_spacing = spacing < 0 ? 0 : spacing > 32 ? 32 : spacing;
+    parse_target->workspace_max_icons = limit < 1 ? 1 : limit > 16 ? 16 : limit;
     cfg_str(m, "overview-label", parse_target->overview_label,
             sizeof(parse_target->overview_label));
     // Tags that stay visible even when empty (1-based numbers)
@@ -768,6 +775,9 @@ static void defaults_into(MangoConfig *cfg) {
   snprintf(cfg->overview_label, sizeof(cfg->overview_label), "%s",
            "OVERVIEW");
   cfg->only_occupied = true;
+  cfg->workspace_icon_size = 16;
+  cfg->workspace_icon_spacing = 4;
+  cfg->workspace_max_icons = 5;
   snprintf(cfg->separator, sizeof(cfg->separator), "%s", " | ");
   cfg->tray_pad = 2;
   cfg->tray_gap = 4;

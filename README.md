@@ -42,13 +42,14 @@ Libraries:
 - `libpulse`
 - `systemd-libs`
 - `gdk-pixbuf2`
+- `glib2` (GIO desktop-file support)
 - `libxkbcommon`
 
 Arch:
 
 ```sh
 sudo pacman -S --needed meson ninja cjson wayland wayland-protocols \
-  fcft tllist pixman cairo pango libpulse systemd-libs gdk-pixbuf2 libxkbcommon
+  fcft tllist pixman cairo pango libpulse systemd-libs gdk-pixbuf2 glib2 libxkbcommon
 ```
 
 Debian/Ubuntu:
@@ -57,6 +58,7 @@ Debian/Ubuntu:
 sudo apt install meson ninja-build libcjson-dev libwayland-dev \
   wayland-protocols libfcft-dev libpixman-1-dev libcairo2-dev \
   libpango1.0-dev libpulse-dev libtllist-dev libsystemd-dev libgdk-pixbuf-2.0-dev \
+  libglib2.0-dev \
   libxkbcommon-dev pkg-config
 ```
 
@@ -78,6 +80,31 @@ connection. Built-in brightness scrolling writes sysfs and falls back to
 logind's `SetBrightness` method when the user cannot write sysfs, matching
 `brightnessctl`'s behavior. `pamixer` / `brightnessctl` are only needed if
 your click/scroll actions call them.
+
+### Workspace application icons
+
+To show application icons beside each workspace number:
+
+```jsonc
+"workspaces": {
+  "show-app-icons": true,
+  "app-icon-size": 16,
+  "app-icon-spacing": 4,
+  "max-app-icons": 5
+}
+```
+
+Icons are off by default. Sizes and spacing are logical pixels; icon size is
+limited to the bar height. `max-app-icons` accepts 1–16 and defaults to 5.
+Each window contributes an icon to its tags on its own monitor, including
+inactive tags. Scratchpad and swallowed windows are excluded.
+
+The bar queries Mango's `get all-clients` IPC once per second without spawning
+`mmsg`. Application IDs are matched against XDG desktop-file IDs and
+`StartupWMClass`; their `Icon` entries are resolved using the same theme lookup
+as tray icons. Images and lookup results are cached, including misses. Unknown
+applications use `application-x-executable` when available. SVG icons require a
+GdkPixbuf SVG loader (usually provided by `librsvg`).
 
 ### Nix
 

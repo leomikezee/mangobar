@@ -22,7 +22,14 @@
           mangobar = pkgs.stdenv.mkDerivation {
             pname = "mangobar";
             version = "0.1.1";
-            src = self;
+            src = pkgs.lib.cleanSourceWith {
+              src = self;
+              filter = path: type:
+                let name = baseNameOf path;
+                in pkgs.lib.cleanSourceFilter path type
+                  && !(type == "directory" &&
+                    (name == "build" || pkgs.lib.hasPrefix "build-" name));
+            };
 
             nativeBuildInputs = with pkgs; [
               meson
@@ -39,6 +46,7 @@
               cjson
               fcft
               gdk-pixbuf
+              glib
               librsvg
               libpulseaudio
               libxkbcommon

@@ -24,6 +24,7 @@ deps = [
   sdbus_dep,
   dependency('libudev'),
   dependency('gdk-pixbuf-2.0'),
+  dependency('gio-unix-2.0'),
   dependency('xkbregistry'),
   cc.find_library('rt'),
   cc.find_library('cjson'),
@@ -87,8 +88,17 @@ executable('mangobar',
     'rtconfig.c',
     'style.c',
     'tray.c',
+    'icons.c',
+    'workspace-apps.c',
     'menu.c'
   ],
   dependencies: deps,
   install: true
 )
+
+workspace_apps_test = executable('test-workspace-apps',
+  sources: ['tests/workspace-apps.c', 'workspace-apps.c', 'icons.c'],
+  include_directories: include_directories('.'),
+  dependencies: deps,
+)
+test('workspace-apps', workspace_apps_test)
